@@ -19,6 +19,12 @@ static int command_thread_error;
 static int command_thread_shutdown;
 static unsigned clients = 0;
 
+typedef struct {
+    /* write request structure at address 0 */
+    uv_write_t req;
+    uv_buf_t buf;
+} write_req_t;
+
 struct command_context {
     /* embedded client pipe structure at address 0 */
     uv_pipe_t client;
@@ -383,12 +389,18 @@ static void pipe_close_cb(uv_handle_t* handle)
 static void pipe_write_cb(uv_write_t* req, int status)
 {
     (void)status;
-    uv_pipe_t *client = req->data;
+    write_req_t *reply_req = (write_req_t*) req;
+    uv_pipe_t *client = reply_req->req.data;
+
+    freez(reply_req->buf.base);
 
     uv_close((uv_handle_t *)client, pipe_close_cb);
     --clients;
     info("Command Clients = %u\n", clients);
+
+    freez(reply_req);
 }
+
 
 static inline void add_char_to_command_reply(char *reply_string, unsigned *reply_string_size, char character)
 {
@@ -411,30 +423,32 @@ static inline void add_string_to_command_reply(char *reply_string, unsigned *rep
 static void send_command_reply(struct command_context *cmd_ctx, cmd_status_t status, char *message)
 {
     int ret;
-    char reply_string[MAX_COMMAND_LENGTH] = {'\0', };
     char exit_status_string[MAX_EXIT_STATUS_LENGTH + 1] = {'\0', };
-    unsigned reply_string_size = 0;
-    uv_buf_t write_buf;
     uv_stream_t *client = (uv_stream_t *)(uv_pipe_t *)cmd_ctx;
 
+    write_req_t *reply_req = (write_req_t*) mallocz(sizeof(write_req_t));
+    reply_req->buf = uv_buf_init((char*) mallocz(MAX_COMMAND_LENGTH), MAX_COMMAND_LENGTH);
+
     snprintfz(exit_status_string, MAX_EXIT_STATUS_LENGTH, "%u", status);
-    add_char_to_command_reply(reply_string, &reply_string_size, CMD_PREFIX_EXIT_CODE);
-    add_string_to_command_reply(reply_string, &reply_string_size, exit_status_string);
-    add_char_to_command_reply(reply_string, &reply_string_size, '\0');
+
+    add_char_to_command_reply(reply_req->buf.base, &(reply_req->buf.len), '\0');
+    add_char_to_command_reply(reply_req->buf.base, &(reply_req->buf.len), CMD_PREFIX_EXIT_CODE);
+    add_string_to_command_reply(reply_req->buf.base, &(reply_req->buf.len), exit_status_string);
+    add_char_to_command_reply(reply_req->buf.base, &(reply_req->buf.len), '\0');
 
     if (message) {
-        add_char_to_command_reply(reply_string, &reply_string_size, cmd_prefix_by_status[status]);
-        add_string_to_command_reply(reply_string, &reply_string_size, message);
+        add_char_to_command_reply(reply_req->buf.base, &(reply_req->buf.len), cmd_prefix_by_status[status]);
+        add_string_to_command_reply(reply_req->buf.base, &(reply_req->buf.len), message);
     }
 
     cmd_ctx->write_req.data = client;
-    write_buf.base = reply_string;
-    write_buf.len = reply_string_size;
-    ret = uv_write(&cmd_ctx->write_req, (uv_stream_t *)client, &write_buf, 1, pipe_write_cb);
+    reply_req->req.data = client;
+
+    ret = uv_write((uv_write_t *)reply_req, (uv_stream_t *)client, &reply_req->buf, 1, pipe_write_cb);
     if (ret) {
         error("uv_write(): %s", uv_strerror(ret));
     }
-    info("COMMAND: Sending reply: \"%s\"", reply_string);
+    info("COMMAND: Sending reply: \"%s\"", reply_req->buf.data);
 }
 
 cmd_status_t execute_command(cmd_t idx, char *args, char **message)
