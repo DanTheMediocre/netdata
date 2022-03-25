@@ -448,7 +448,7 @@ static void send_command_reply(struct command_context *cmd_ctx, cmd_status_t sta
     if (ret) {
         error("uv_write(): %s", uv_strerror(ret));
     }
-    info("COMMAND: Sending reply: \"%s\"", reply_req->buf.data);
+    info("COMMAND: Sending reply: \"%s\"", reply_req->buf.base);
 }
 
 cmd_status_t execute_command(cmd_t idx, char *args, char **message)
