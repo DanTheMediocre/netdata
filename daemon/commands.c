@@ -402,12 +402,12 @@ static void pipe_write_cb(uv_write_t* req, int status)
 }
 
 
-static inline void add_char_to_command_reply(char *reply_string, unsigned *reply_string_size, char character)
+static inline void add_char_to_command_reply(char *reply_string, size_t *reply_string_size, char character)
 {
     reply_string[(*reply_string_size)++] = character;
 }
 
-static inline void add_string_to_command_reply(char *reply_string, unsigned *reply_string_size, char *str)
+static inline void add_string_to_command_reply(char *reply_string, size_t *reply_string_size, char *str)
 {
     unsigned len;
 
